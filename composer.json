@@ -1,0 +1,18 @@
+{
+    "name": "mage/db2",
+    "description": "Magento 2 module to load Laravel Eloquent with Magento",
+    "require": {
+        "mage/dotenv": "^1.0",
+        "illuminate/database": "^10",
+        "illuminate/container": "^10",
+        "illuminate/events": "^10"
+    },
+    "type": "magento2-module",
+    "autoload": {
+        "psr-4": {
+            "Mage\\DB2\\": ""
+        }
+    },
+    "version": "1.0.3",
+    "minimum-stability": "stable"
+}
