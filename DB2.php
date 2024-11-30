@@ -2,10 +2,9 @@
 
 namespace Mage\DB2;
 
+use Illuminate\Container\Container;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Illuminate\Events\Dispatcher;
-use Illuminate\Container\Container;
-use Mage\DotEnv as Env;
 
 class DB2 extends Capsule
 {
@@ -30,7 +29,7 @@ class DB2 extends Capsule
         if (self::$init === false) {
             try {
                 parent::__construct();
-            
+
                 // Set the PDO connection
                 // $this->getDatabaseManager()->extend('pdo_connection', function () use ($pdo) {
                 //    return $pdo;
@@ -58,18 +57,18 @@ class DB2 extends Capsule
     private function getMageConfig()
     {
         $path = false;
-        if(!defined("BP")){
-            if(file_exists(__DIR__ .'/../../../../app/etc/env.php')){
-                $path = realpath(__DIR__ .'/../../../..') . '/app/etc/env.php';
-            } else if(file_exists(__DIR__ .'/../../../../../app/etc/env.php')){
-                $path = realpath(__DIR__ .'/../../../../..') . 'app/etc/env.php';
+        if (!defined("BP")) {
+            if (file_exists(__DIR__ . '/../../../../app/etc/env.php')) {
+                $path = realpath(__DIR__ . '/../../../..') . '/app/etc/env.php';
+            } else if (file_exists(__DIR__ . '/../../../../../app/etc/env.php')) {
+                $path = realpath(__DIR__ . '/../../../../..') . 'app/etc/env.php';
             } else {
                 throw new \Exception("env file issue");
             }
         } else {
             $path = \BP  . '/app/etc/env.php';
         }
-       
+
         if ($path !== false) {
             return include $path;
         }
@@ -97,18 +96,20 @@ class DB2 extends Capsule
      * @param  string|null  $connection
      * @return \Illuminate\Database\Connection
      */
-    public static function connection($connection = null){
-        if(static::$instance === null){
+    public static function connection($connection = null)
+    {
+        if (static::$instance === null) {
             static::init();
         }
         return static::$instance->getConnection($connection);
     }
 
-    public static function init($config = []) {
+    public static function init($config = [])
+    {
         if (static::$instance === null) {
             new self;
-         }
-         return static::$instance;
+        }
+        return static::$instance;
     }
 
     /**
@@ -137,11 +138,12 @@ class DB2 extends Capsule
         return static::$instance->connection($connection)->getSchemaBuilder();
     }
 
-    public static function debugOut($on = true){
+    public static function debugOut($on = true)
+    {
 
-        if($on){
+        if ($on) {
             static::connection()->setEventDispatcher(new Dispatcher(new Container));
-            static::connection()->listen(function ($query){
+            static::connection()->listen(function ($query) {
                 echo "SQL: {$query->sql}\n";
                 echo "Bindings: " . json_encode($query->bindings) . "\n";
                 echo "Time: {$query->time}ms\n";
@@ -149,9 +151,65 @@ class DB2 extends Capsule
         } else {
             static::connection()->setEventDispatcher(null);
             static::connection()->flushEventListeners();
+        }
+    }
 
+    /**
+     * Bind ? Parameters to SQL
+     *
+     * @param $query
+     */
+    public function toFullSql($query)
+    {
+        $sql = $query->toSql();
+        $bindings = $query->getBindings();
+
+        return vsprintf(
+            str_replace('?', "'%s'", $sql),
+            array_map('addslashes', $bindings)
+        );
+    }
+
+    public function sendAsync(array $queries, $connection = 'default', $concurency = 5)
+    {
+        $config = $this->getMageConfig()['db']['connection'][$connection];
+        $mysqli = [];
+        //For now createing new connection for every Query. TODO: manage pool of the connections.
+        $concurency = count($queries);
+        // Create three separate MySQLi connections
+        for ($i = 1; $i <= $concurency; $i++) {
+            $mysqli[$i] = new mysqli($config['host'], $config["user"], $config["password"], $config["database"]);
+            if ($mysqli[$i]->connect_errno) {
+                die("Failed to connect to MySQL: " . $mysqli[$i]->connect_error);
+            }
+            $mysqli[$i]->query($queries[$i - 1], MYSQLI_ASYNC);
+        }
+
+        $links = $mysqli;
+
+        // Process queries as results are ready
+        do {
+            $ready = mysqli_poll($links, $errors = [], $rejects = [], 1); // Wait for results (1-second timeout)
+            if ($ready > 0) {
+                foreach ($links as $key => $mysqli) {
+                    if ($result = $mysqli->reap_async_query()) { // Fetch result
+                        while ($row = $result->fetch_assoc()) {
+                            echo $row['message'] . "\n";
+                        }
+                        $result->free();
+                    } else {
+                        //echo "Query failed: " . $mysqli->error . "\n";
+                    }
+
+                    // Remove completed connection
+                    unset($links[$key]);
+                }
+            }
+        } while (!empty($links)); // Continue until all queries are processed
+
+        // Close connections
+        foreach ($mysqli as $con) {
+            $con->close();
         }
     }
 }
-
-
