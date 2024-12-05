@@ -11,9 +11,12 @@ class DB2 extends Capsule
     static $instance = null;
     static $init = false;
     private $om;
+    private $PDO = null;
     private $config = [];
 
     /**
+     * Default connection parameters
+     *
      * @var array
      */
     protected $baseParams = [
@@ -24,7 +27,7 @@ class DB2 extends Capsule
         'prefix' => '',
     ];
 
-    public function __construct(array $params = [])
+    public function __construct(string $name = 'default', array $params = [])
     {
         if (self::$init === false) {
             try {
@@ -35,10 +38,12 @@ class DB2 extends Capsule
                 //    return $pdo;
                 // });
 
-                $this->addConnection('default', $params);
+                $this->addConnection($name, $params);
 
                 $this->setAsGlobal();
                 $this->bootEloquent();
+
+                //Class Aliases
                 class_alias(self::class, 'Mage\DB2');
                 class_alias(self::class, 'DB2');
 
@@ -54,16 +59,21 @@ class DB2 extends Capsule
         return static::$instance;
     }
 
+    /**
+     * Get Magento Config from the config file.
+     *
+     */
     private function getMageConfig()
     {
         $path = false;
+        // if called stand alone before bootstrap BP is not avalable
         if (!defined("BP")) {
             if (file_exists(__DIR__ . '/../../../../app/etc/env.php')) {
                 $path = realpath(__DIR__ . '/../../../..') . '/app/etc/env.php';
             } else if (file_exists(__DIR__ . '/../../../../../app/etc/env.php')) {
                 $path = realpath(__DIR__ . '/../../../../..') . 'app/etc/env.php';
             } else {
-                throw new \Exception("env file issue");
+                throw new \Exception("env file issue, not found");
             }
         } else {
             $path = \BP  . '/app/etc/env.php';
@@ -75,6 +85,13 @@ class DB2 extends Capsule
         return false;
     }
 
+    /**
+     * Create named connection - DB2 requres new connection
+     *
+     * @param string $name
+     * @param array $params
+     * @return void
+     */
     public function addConnection($name = 'default', $params = [])
     {
         $timeStart = microtime(false);
@@ -104,10 +121,17 @@ class DB2 extends Capsule
         return static::$instance->getConnection($connection);
     }
 
-    public static function init($config = [])
+    /**
+     * Init DB connection if not exists if used not from the new object()
+     *
+     * @param string $name - name of the magento connection 
+     * @param array $config - aditional parameters
+     * @return void
+     */
+    public static function init(string $name = 'default', array $config = [])
     {
         if (static::$instance === null) {
-            new self;
+            new self($name, $config);
         }
         return static::$instance;
     }
@@ -138,6 +162,12 @@ class DB2 extends Capsule
         return static::$instance->connection($connection)->getSchemaBuilder();
     }
 
+    /**
+     * Disable Enable Debug output
+     *
+     * @param boolean $on - enable true, disable false
+     * @return void
+     */
     public static function debugOut($on = true)
     {
 
@@ -170,6 +200,14 @@ class DB2 extends Capsule
         );
     }
 
+    /**
+     * Send multiple SQL queries asyncroniously using MySQLi
+     *
+     * @param array $queries
+     * @param string $connection
+     * @param integer $concurency
+     * @return void
+     */
     public function sendAsync(array $queries, $connection = 'default', $concurency = 5)
     {
         $config = $this->getMageConfig()['db']['connection'][$connection];
@@ -211,5 +249,31 @@ class DB2 extends Capsule
         foreach ($mysqli as $con) {
             $con->close();
         }
+    }
+
+    /**
+     * Sanitize for RAW SQL using PDO function
+     *
+     * @param [type] $input
+     * @return void
+     */
+    public function sanitize($input)
+    {
+        if (!$this->PDO) {
+            $this->PDO = static::connection()->getPdo();
+        }
+        return $this->PDO->quote($input);
+    }
+
+    /**
+     * Sanitize for RAW SQL alias
+     * or use e() laravel function
+     *
+     * @param [type] $input
+     * @return void
+     */
+    public function s($input)
+    {
+        return $this->sanitize($input);
     }
 }
