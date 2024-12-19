@@ -14,6 +14,10 @@ class DB2 extends Capsule
     private $PDO = null;
     private $config = [];
 
+    //async
+    private $mysqli;
+    private $asyncQueryPool = [];
+
     /**
      * Default connection parameters
      *
@@ -63,7 +67,7 @@ class DB2 extends Capsule
      * Get Magento Config from the config file.
      *
      */
-    private function getMageConfig()
+    public function getMageConfig()
     {
         $path = false;
         // if called stand alone before bootstrap BP is not avalable
@@ -124,11 +128,26 @@ class DB2 extends Capsule
     /**
      * Init DB connection if not exists if used not from the new object()
      *
-     * @param string $name - name of the magento connection 
+     * @param string $name - name of the magento connection
      * @param array $config - aditional parameters
      * @return void
      */
     public static function init(string $name = 'default', array $config = [])
+    {
+        if (static::$instance === null) {
+            new self($name, $config);
+        }
+        return static::$instance;
+    }
+
+    /**
+     * get DB connection if not exists if used not from the new object()
+     *
+     * @param string $name - name of the magento connection
+     * @param array $config - aditional parameters
+     * @return void
+     */
+    public static function instance(string $name = 'default', array $config = [])
     {
         if (static::$instance === null) {
             new self($name, $config);
@@ -200,55 +219,56 @@ class DB2 extends Capsule
         );
     }
 
-    /**
-     * Send multiple SQL queries asyncroniously using MySQLi
-     *
-     * @param array $queries
-     * @param string $connection
-     * @param integer $concurency
-     * @return void
+    /** Generate an SQL INSERT query from an associative array of data. * *
+     * @param string $tableName
+     * @param array $data
+     * @return string
      */
-    public function sendAsync(array $queries, $connection = 'default', $concurency = 5)
+    public static function generateInsertQuery($tableName, $data)
     {
-        $config = $this->getMageConfig()['db']['connection'][$connection];
-        $mysqli = [];
-        //For now createing new connection for every Query. TODO: manage pool of the connections.
-        $concurency = count($queries);
-        // Create three separate MySQLi connections
-        for ($i = 1; $i <= $concurency; $i++) {
-            $mysqli[$i] = new mysqli($config['host'], $config["user"], $config["password"], $config["database"]);
-            if ($mysqli[$i]->connect_errno) {
-                die("Failed to connect to MySQL: " . $mysqli[$i]->connect_error);
+
+        try {
+            if (empty($data)) {
+                throw new \Exception("Data list is empty.");
             }
-            $mysqli[$i]->query($queries[$i - 1], MYSQLI_ASYNC);
-        }
 
-        $links = $mysqli;
+            // Extract columns from the first data array
+            $columns = array_keys($data[0]);
 
-        // Process queries as results are ready
-        do {
-            $ready = mysqli_poll($links, $errors = [], $rejects = [], 1); // Wait for results (1-second timeout)
-            if ($ready > 0) {
-                foreach ($links as $key => $mysqli) {
-                    if ($result = $mysqli->reap_async_query()) { // Fetch result
-                        while ($row = $result->fetch_assoc()) {
-                            echo $row['message'] . "\n";
-                        }
-                        $result->free();
-                    } else {
-                        //echo "Query failed: " . $mysqli->error . "\n";
+            // Escape column names for SQL
+            $escapedColumns = array_map(function ($column) {
+                return '`' . addslashes($column) . '`';
+            }, $columns);
+
+            // Create an array to hold value sets
+            $valueSets = [];
+
+            foreach ($data as $insert) {
+                $values = array_values($insert);
+
+                // Escape values for SQL
+                $escapedValues = array_map(function ($value) {
+                    if ($value === null) {
+                        return 'NULL';
                     }
+                    return '\'' . addslashes($value) . '\'';
+                }, $values);
 
-                    // Remove completed connection
-                    unset($links[$key]);
-                }
+                $valueSets[] = '(' . implode(', ', $escapedValues) . ')';
             }
-        } while (!empty($links)); // Continue until all queries are processed
 
-        // Close connections
-        foreach ($mysqli as $con) {
-            $con->close();
+            // Create SQL query
+            $columnsString = implode(', ', $escapedColumns);
+            $valuesString = implode(', ', $valueSets);
+            $sql = "INSERT INTO `{$tableName}` ({$columnsString}) VALUES {$valuesString};";
+
+        } catch (\Throwable $e) {
+            dump($data);
+            echo $e->getMessage();
         }
+
+        return $sql;
+
     }
 
     /**
