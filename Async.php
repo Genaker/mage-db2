@@ -124,10 +124,10 @@ class Async
                 $this->asyncQueryPool[$this->mysqli[$index]->thread_id] = $this->mysqli[$index];
             }
         }
-        /*
+        
         $links = $errors = $rejects = $this->asyncQueryPool;
         $ready = \mysqli_poll($links, $errors, $rejects, 0, 0);
-        */
+        
 
         if ($await) {
             if ($debug) {
@@ -140,158 +140,162 @@ class Async
 
     public function asyncAwait($debug = false)
     {
-        $queryPool = &$this->asyncQueryPool;
+        try {
+            $queryPool = &$this->asyncQueryPool;
 
-        $links = $queryPool;
-        $allLinks = $links;
-        $checkCount = 0;
-        //dd($links);
+            $links = $queryPool;
+            $allLinks = $links;
+            $checkCount = 0;
+            //dd($links);
+            //$links = array_filter($this->mysqli, function ($mysqli) { return $mysqli->stat(); });
 
-        //$links = array_filter($this->mysqli, function ($mysqli) { return $mysqli->stat(); });
+            $errors = [];
+            $rejects = [];
+            $processed = 0;
 
-        $errors = [];
-        $rejects = [];
-        $processed = 0;
+            $return = [];
 
-        $return = [];
-
-        // Process queries as results are ready
-        if (count($links) > 0) {
-            do {
-                $checkCount++;
-                if ($debug) {
-                    echo "------[$processed]------\n";
-                }
-                // Initialize $links with active connections each loop
-                $links = $allLinks;
-                $errors = $allLinks;
-                $rejects = $allLinks;
-
-                $links = $errors = $rejects = array();
-                foreach ($allLinks as $link) {
-                    $links[] = $errors[] = $rejects[] = $link;
-                }
-
-                if (empty($links)) {
-                    break; // Break the loop if there are no active connections
-                }
-                $ready = \mysqli_poll($links, $errors, $rejects, 0, 0); // Wait for results (0-second timeout)
-                if ($ready > 0) {
+            // Process queries as results are ready
+            if (count($links) > 0) {
+                do {
+                    $checkCount++;
                     if ($debug) {
-                        echo "Ready: " . count($links);
-                        echo "Error: " . count($errors);
-                        echo "Rejected: " . count($rejects);
+                        echo "------[$processed]------\n";
                     }
-                    //die();
-                }
-                if ($ready === false) {
-                    print_r($ready);
-                    die("mysqli_poll ready error");
-                }
-                // $links will now only contain connections that are ready
-                if ($debug) {
-                    echo "Ready: ";
-                    dump($ready);
-                    echo "Errors: ";
-                    dump($errors);
-                    echo "Rejected: ";
-                    dump($rejects);
-                }
+                    // Initialize $links with active connections each loop
+                    $links = $allLinks;
+                    $errors = $allLinks;
+                    $rejects = $allLinks;
 
-                // basicaly rejected when it is not select
-                foreach ($rejects as $link) {
-                    if ($debug) {
-                        echo "Rejected->\n";
-                        //print_r($link);
-                        echo "Query rejected error: " . mysqli_error($link) . "\n";
-                        echo "Affected Row Reject: " . $link->affected_rows . "\n";
-                        if ($link->warning_count > 0) {
-                            $result = $link->query("SHOW WARNINGS");
-                            while ($row = $result->fetch_assoc()) {
-                                echo "Level: " . $row['Level'] . "\n";
-                                echo "Code: " . $row['Code'] . "\n";
-                                echo "Message: " . $row['Message'] . "\n";
-                            }
-                            $result->close();
-                        }
+                    $links = $errors = $rejects = array();
+                    foreach ($allLinks as $link) {
+                        $links[] = $errors[] = $rejects[] = $link;
                     }
 
-                    unset($queryPool[$link->thread_id]);
-                    if ($ready === 0) {
-                        $processed++;
-                    } else {
-                        // will be processed in the next move
+                    if (empty($links)) {
+                        break; // Break the loop if there are no active connections
                     }
-                    //error_log("Query rejected: " . mysqli_error($link)); // Optionally, you can retry the query or handle it as needed
-                }
-
-                // basicaly rejected when it is not select
-                foreach ($errors as $link) {
-                    if ($debug) {
-                        echo "Error->\n";
-                        echo "Query Error: " . mysqli_error($link) . "\n";
-                    }
-
-                    unset($queryPool[$link->thread_id]);
-                    if ($ready === 0) {
-                        $processed++;
-                    } else {
-                        // will be processed in the next move
-                    }
-                    error_log("Async Query Error: " . mysqli_error($link)); // Optionally, you can retry the query or handle it as needed
-                }
-
-                if ($ready > 0) {
-                    foreach ($links as $key => $mysqli) {
+                    $ready = \mysqli_poll($links, $errors, $rejects, 0, 0); // Wait for results (0-second timeout)
+                    if ($ready > 0) {
                         if ($debug) {
-                            echo "check $key\n";
+                            echo "Ready: " . count($links);
+                            echo "Error: " . count($errors);
+                            echo "Rejected: " . count($rejects);
                         }
-
-                        if ($result = $mysqli->reap_async_query()) { // Fetch result
-                            if ($debug) {
-                                print_r("Result $key: " . gettype($result) . "\n");
-                            }
-                            // For successful queries which produce a result set, such as SELECT, SHOW, DESCRIBE or EXPLAIN,
-                            if ($result === true) {
-                                $affectedRows = $mysqli->affected_rows;
-                                if ($debug) {
-                                    print_r("Affected Rows Insert: " . $affectedRows . "\n");
-                                }
-                                // Remove completed connection
-                                // everething is ok on insert
-                            }
-                            if (is_object($result)) {
-                                while ($row = $result->fetch_assoc()) {
-                                    $return['rows'][] = $row;
-                                }
-                                if ($debug) {
-                                    print_r("Rows Select:" . count($return) . " \n");
-                                }
-                                $result->free();
-                                unset($queryPool[$mysqli->thread_id]);
-                            }
-
-                        } else {
-                            if ($debug) {
-                                echo "Query failed: " . $mysqli->error;
-                            }
-                            error_log("Query failed: " . $mysqli->error);
-                        }
-                        unset($queryPool[$mysqli->thread_id]);
-                        $processed++;
+                        //die();
                     }
+                    if ($ready === false) {
+                        print_r($ready);
+                        die("mysqli_poll ready error");
+                    }
+                    // $links will now only contain connections that are ready
+                    if ($debug) {
+                        echo "Ready: ";
+                        dump($ready);
+                        echo "Errors: ";
+                        dump($errors);
+                        echo "Rejected: ";
+                        dump($rejects);
+                    }
+
+                    // basicaly rejected when it is not select
+                    foreach ($rejects as $link) {
+                        if ($debug) {
+                            echo "Rejected->\n";
+                            //print_r($link);
+                            echo "Query rejected error: " . mysqli_error($link) . "\n";
+                            echo "Affected Row Reject: " . $link->affected_rows . "\n";
+                            if ($link->warning_count > 0) {
+                                $result = $link->query("SHOW WARNINGS");
+                                while ($row = $result->fetch_assoc()) {
+                                    echo "Level: " . $row['Level'] . "\n";
+                                    echo "Code: " . $row['Code'] . "\n";
+                                    echo "Message: " . $row['Message'] . "\n";
+                                }
+                                $result->close();
+                            }
+                        }
+
+                        unset($queryPool[$link->thread_id]);
+                        if ($ready === 0) {
+                            $processed++;
+                        } else {
+                            // will be processed in the next move
+                        }
+                        //error_log("Query rejected: " . mysqli_error($link)); // Optionally, you can retry the query or handle it as needed
+                    }
+
+                    // basicaly rejected when it is not select
+                    foreach ($errors as $link) {
+                        if ($debug) {
+                            echo "Error->\n";
+                            echo "Query Error: " . mysqli_error($link) . "\n";
+                        }
+
+                        unset($queryPool[$link->thread_id]);
+                        if ($ready === 0) {
+                            $processed++;
+                        } else {
+                            // will be processed in the next move
+                        }
+                        error_log("Async Query Error: " . mysqli_error($link)); // Optionally, you can retry the query or handle it as needed
+                    }
+
+                    if ($ready > 0) {
+                        foreach ($links as $key => $mysqli) {
+                            if ($debug) {
+                                echo "check $key\n";
+                            }
+
+                            if ($result = $mysqli->reap_async_query()) { // Fetch result
+                                if ($debug) {
+                                    print_r("Result $key: " . gettype($result) . "\n");
+                                }
+                                // For successful queries which produce a result set, such as SELECT, SHOW, DESCRIBE or EXPLAIN,
+                                if ($result === true) {
+                                    $affectedRows = $mysqli->affected_rows;
+                                    if ($debug) {
+                                        print_r("Affected Rows Insert: " . $affectedRows . "\n");
+                                    }
+                                    // Remove completed connection
+                                    // everething is ok on insert
+                                }
+                                if (is_object($result)) {
+                                    while ($row = $result->fetch_assoc()) {
+                                        $return['rows'][] = $row;
+                                    }
+                                    if ($debug) {
+                                        print_r("Rows Select:" . count($return) . " \n");
+                                    }
+                                    $result->free();
+                                    unset($queryPool[$mysqli->thread_id]);
+                                }
+
+                            } else {
+                                if ($debug) {
+                                    echo "Query failed: " . $mysqli->error;
+                                }
+                                error_log("Query failed: " . $mysqli->error);
+                            }
+                            unset($queryPool[$mysqli->thread_id]);
+                            $processed++;
+                        }
+                    }
+                    \usleep(100);
+                } while (!empty($queryPool) /*$processed < count($allLinks)*/);
+                if ($debug) {
+                    echo "Loop: " . $checkCount . "\n";
                 }
-                \usleep(100);
-            } while (!empty($queryPool) /*$processed < count($allLinks)*/);
-            if ($debug) {
-                echo "Loop: " . $checkCount . "\n";
+                //die();
             }
-            //die();
+            if ($debug) {
+                echo "Row Selected Count : " . count($return['rows']) . "\n";
+            }
+            return $return;
+        } catch (\Exception $e) {
+            print_r($e->getTraceAsString());
+            echo("Async SQL Error: " . $e->getMessage() . "\n");
+            throw new $e;
         }
-        if ($debug) {
-            echo "Row Selected Count : " . count($return['rows']) . "\n";
-        }
-        return $return;
-        //$this->asyncQueryPool = [];
     }
 }

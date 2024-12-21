@@ -1,4 +1,5 @@
 <?php
+declare (strict_types = 1);
 
 namespace Mage\DB2;
 
@@ -226,7 +227,7 @@ class DB2 extends Capsule
      */
     public static function generateInsertQuery($tableName, $data)
     {
-
+        $sql = [];
         try {
             if (empty($data)) {
                 throw new \Exception("Data list is empty.");
@@ -251,7 +252,10 @@ class DB2 extends Capsule
                     if ($value === null) {
                         return 'NULL';
                     }
-                    return '\'' . addslashes($value) . '\'';
+                    if (is_int($value) || is_float($value)) {
+                        return (string) $value;
+                    }
+                    return '\'' . addslashes((string) $value) . '\'';
                 }, $values);
 
                 $valueSets[] = '(' . implode(', ', $escapedValues) . ')';
@@ -295,5 +299,25 @@ class DB2 extends Capsule
     public function s($input)
     {
         return $this->sanitize($input);
+    }
+}
+
+if (!function_exists('formatTime')) {
+    function formatTime($seconds)
+    {
+        // Ensure the input is treated as a float
+        $seconds = (float) $seconds;
+
+        // Extract hours
+        $hours = floor($seconds / 3600);
+        // Extract remaining minutes
+        $minutes = @floor(($seconds % 3600) / 60);
+        // Extract remaining seconds
+        $remainingSeconds = @floor($seconds % 60);
+        // Extract milliseconds from the fractional part of the seconds
+        $millis = (int) round(fmod($seconds, 1) * 1000);
+
+        // Format as hh:mm:ss:millis
+        return sprintf("%02d:%02d:%02d:%03d", $hours, $minutes, $remainingSeconds, $millis);
     }
 }
