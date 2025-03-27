@@ -3,7 +3,9 @@
 ```
 composer require mage/db2
 ```
-# Usage 
+if you have conflicts 
+```
+composer require package-name --with-all-dependencies --ignore-platform-reqs --prefer-source --no-scripts
 
 ```
 use  Mage\DB2\DB2;
